@@ -251,6 +251,11 @@ do
   -- kitty keyboard protocol (Ghostty does) to send <C--> distinctly.
   vim.keymap.set('n', '<C-->', '<C-o>', { desc = 'Jump back' })
 
+  -- Faster vertical movement, normal and visual. Both keys had a stock meaning:
+  -- J joined lines (still on `gJ` and `:join`), K was LSP hover (now on `gh`).
+  vim.keymap.set({ 'n', 'x' }, 'J', '5j', { desc = 'Down 5 lines' })
+  vim.keymap.set({ 'n', 'x' }, 'K', '5k', { desc = 'Up 5 lines' })
+
   -- Yank `/abs/path/to/file:12` (or `:12-15` for a visual selection) to the system clipboard.
   vim.keymap.set({ 'n', 'x' }, '<leader>y', function()
     -- `line('v')` is the other end of the visual selection, or the cursor line in normal mode.
