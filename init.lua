@@ -99,7 +99,7 @@ do
   vim.g.maplocalleader = ' '
 
   -- Set to true if you have a Nerd Font installed and selected in the terminal
-  vim.g.have_nerd_font = false
+  vim.g.have_nerd_font = true
 
   -- [[ Setting options ]]
   --  See `:help vim.o`
@@ -185,6 +185,18 @@ do
   --  See `:help hlsearch`
   vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
+  -- File keymaps
+  vim.keymap.set('n', '<leader>fs', '<Cmd>update<CR>', { desc = '[F]ile [S]ave' })
+  vim.keymap.set('n', '<leader>S', '<Cmd>wall<CR>', { desc = '[S]ave all changed files' })
+  vim.keymap.set('n', '<leader>w', '<Cmd>bdelete<CR>', { desc = 'Close buffer' })
+  vim.keymap.set('n', '<leader>W', function()
+    local cur = vim.api.nvim_get_current_buf()
+    for _, b in ipairs(vim.fn.getbufinfo { buflisted = 1 }) do
+      -- `vim.o.confirm` above makes unsaved buffers prompt rather than vanish.
+      if b.bufnr ~= cur then vim.cmd.bdelete(b.bufnr) end
+    end
+  end, { desc = 'Close all other buffers' })
+
   -- Diagnostic Config & Keymaps
   --  See `:help vim.diagnostic.Opts`
   vim.diagnostic.config {
@@ -210,6 +222,7 @@ do
   }
 
   vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
+  vim.keymap.set('n', '<leader>d', function() vim.diagnostic.jump { count = 1, wrap = true } end, { desc = 'Go to next [D]iagnostic' })
 
   -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
   -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
@@ -233,6 +246,21 @@ do
   vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
   vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
   vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
+
+  -- Jump back in the jumplist (same as <C-o>). Requires a terminal speaking the
+  -- kitty keyboard protocol (Ghostty does) to send <C--> distinctly.
+  vim.keymap.set('n', '<C-->', '<C-o>', { desc = 'Jump back' })
+
+  -- Yank `/abs/path/to/file:12` (or `:12-15` for a visual selection) to the system clipboard.
+  vim.keymap.set({ 'n', 'x' }, '<leader>y', function()
+    -- `line('v')` is the other end of the visual selection, or the cursor line in normal mode.
+    local from, to = vim.fn.line 'v', vim.fn.line '.'
+    if from > to then from, to = to, from end
+    local ref = vim.fn.expand '%:p' .. ':' .. from .. (from ~= to and '-' .. to or '')
+    vim.fn.setreg('+', ref)
+    vim.notify(ref)
+    vim.api.nvim_feedkeys(vim.keycode '<Esc>', 'n', false) -- leave visual mode, like `y` does
+  end, { desc = '[Y]ank file path with line number' })
 
   -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
   -- vim.keymap.set("n", "<C-S-h>", "<C-w>H", { desc = "Move window to the left" })
@@ -424,18 +452,19 @@ do
   -- change the command under that to load whatever the name of that colorscheme is.
   --
   -- If you want to see what colorschemes are already installed, you can use `:Telescope colorscheme`.
-  vim.pack.add { gh 'folke/tokyonight.nvim' }
-  ---@diagnostic disable-next-line: missing-fields
-  require('tokyonight').setup {
-    styles = {
-      comments = { italic = false }, -- Disable italics in comments
+  vim.pack.add { gh 'projekt0n/github-nvim-theme' }
+  require('github-theme').setup {
+    options = {
+      styles = {
+        comments = 'NONE', -- Disable italics in comments
+      },
     },
   }
 
   -- Load the colorscheme here.
   -- Like many other themes, this one has different styles, and you could load
-  -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-  vim.cmd.colorscheme 'tokyonight-night'
+  -- any other, such as 'github_light_default', 'github_light_high_contrast', or 'github_dark'.
+  vim.cmd.colorscheme 'github_light'
 
   -- Highlight todo, notes, etc in comments
   vim.pack.add { gh 'folke/todo-comments.nvim' }
@@ -486,6 +515,17 @@ do
   -- cursor location to LINE:COLUMN
   ---@diagnostic disable-next-line: duplicate-set-field
   statusline.section_location = function() return '%2l:%-2v' end
+
+  -- Open buffers as tabs along the top; `*` marks unsaved ones.
+  require('mini.tabline').setup {
+    format = function(buf_id, label)
+      return MiniTabline.default_format(buf_id, label) .. (vim.bo[buf_id].modified and '* ' or '')
+    end,
+  }
+  -- NOTE: <Tab> is only distinct from <C-i> (jump forward) in terminals speaking the
+  -- kitty keyboard protocol, like Ghostty. Elsewhere this shadows <C-i>.
+  vim.keymap.set('n', '<Tab>', '<Cmd>bnext<CR>', { desc = 'Next buffer' })
+  vim.keymap.set('n', '<S-Tab>', '<Cmd>bprevious<CR>', { desc = 'Previous buffer' })
 
   -- ... and there is more!
   --  Check out: https://github.com/nvim-mini/mini.nvim
@@ -583,6 +623,7 @@ do
       -- This is where a variable was first declared, or where a function is defined, etc.
       -- To jump back, press <C-t>.
       vim.keymap.set('n', 'grd', builtin.lsp_definitions, { buffer = buf, desc = '[G]oto [D]efinition' })
+      vim.keymap.set('n', 'gd', builtin.lsp_definitions, { buffer = buf, desc = '[G]oto [D]efinition' })
 
       -- Fuzzy find all the symbols in your current document.
       -- Symbols are things like variables, functions, types, etc.
@@ -690,6 +731,10 @@ do
       --  For example, in C this would take you to the header.
       map('grD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
 
+      -- Documentation tooltip for the symbol under the cursor (`K` does the same).
+      --  Press it twice to jump inside the window and scroll it.
+      map('gh', function() vim.lsp.buf.hover { border = 'rounded' } end, 'Show [H]over documentation')
+
       -- The following two autocommands are used to highlight references of the
       -- word under your cursor when your cursor rests there for a little while.
       --    See `:help CursorHold` for information about when this is executed
@@ -743,7 +788,7 @@ do
     --    https://github.com/pmizio/typescript-tools.nvim
     --
     -- But for many setups, the LSP (`ts_ls`) will work just fine
-    -- ts_ls = {},
+    ts_ls = {},
 
     stylua = {}, -- Used to format Lua code
 
@@ -822,16 +867,24 @@ end
 do
   -- [[ Formatting ]]
   vim.pack.add { gh 'stevearc/conform.nvim' }
+
+  -- Prettier vs Biome is decided per project: Biome only runs where a `biome.json`
+  -- sits in the project root (`require_cwd` below), otherwise Prettier gets it.
+  -- Both are picked up from the project's own node_modules/.bin.
+  local formatters_by_ft = {}
+  for _, ft in ipairs { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'json', 'jsonc', 'css', 'graphql' } do
+    formatters_by_ft[ft] = { 'biome', 'prettier', stop_after_first = true }
+  end
+  -- Filetypes Biome does not format: Prettier only.
+  for _, ft in ipairs { 'html', 'scss', 'less', 'vue', 'svelte', 'yaml', 'markdown' } do
+    formatters_by_ft[ft] = { 'prettier' }
+  end
+
   require('conform').setup {
     notify_on_error = false,
     format_on_save = function(bufnr)
-      -- You can specify filetypes to autoformat on save here:
-      local enabled_filetypes = {
-        -- lua = true,
-        -- python = true,
-      }
-      if enabled_filetypes[vim.bo[bufnr].filetype] then
-        return { timeout_ms = 500 }
+      if formatters_by_ft[vim.bo[bufnr].filetype] then
+        return { timeout_ms = 1000 }
       else
         return nil
       end
@@ -839,14 +892,9 @@ do
     default_format_opts = {
       lsp_format = 'fallback', -- Use external formatters if configured below, otherwise use LSP formatting. Set to `false` to disable LSP formatting entirely.
     },
-    -- You can also specify external formatters in here.
-    formatters_by_ft = {
-      -- rust = { 'rustfmt' },
-      -- Conform can also run multiple formatters sequentially
-      -- python = { "isort", "black" },
-      --
-      -- You can use 'stop_after_first' to run the first available formatter from the list
-      -- javascript = { "prettierd", "prettier", stop_after_first = true },
+    formatters_by_ft = formatters_by_ft,
+    formatters = {
+      biome = { require_cwd = true }, -- skip Biome in projects without a biome.json
     },
   }
 
@@ -1015,7 +1063,7 @@ do
   -- require 'kickstart.plugins.indent_line'
   -- require 'kickstart.plugins.lint'
   -- require 'kickstart.plugins.autopairs'
-  -- require 'kickstart.plugins.neo-tree'
+  require 'kickstart.plugins.neo-tree'
 
   -- NOTE: You can add your own plugins, configuration, etc. in `lua/custom/plugins/*.lua`.
   --
