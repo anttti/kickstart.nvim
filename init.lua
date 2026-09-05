@@ -111,6 +111,47 @@ do
   vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
   vim.keymap.set('n', '<leader>d', function() vim.diagnostic.jump { count = 1, wrap = true } end, { desc = 'Go to next [D]iagnostic' })
 
+  -- Run a terminal UI in a floating window that disappears when the program quits.
+  local function float_term(cmd, on_close)
+    if vim.fn.executable(cmd) == 0 then
+      return vim.notify(cmd .. ' is not on $PATH', vim.log.levels.ERROR)
+    end
+    -- Unlisted, so the terminal never shows up in the tabline.
+    local buf = vim.api.nvim_create_buf(false, false)
+    local win = vim.api.nvim_open_win(buf, true, {
+      relative = 'editor',
+      width = math.floor(vim.o.columns * 0.9),
+      height = math.floor(vim.o.lines * 0.9),
+      row = math.floor(vim.o.lines * 0.05),
+      col = math.floor(vim.o.columns * 0.05),
+      style = 'minimal',
+      border = 'rounded',
+    })
+    -- These TUIs use <Esc> constantly; shadow the <Esc><Esc> terminal mapping below so it isn't delayed.
+    vim.keymap.set('t', '<Esc>', '<Esc>', { buffer = buf })
+    vim.fn.jobstart({ cmd }, {
+      term = true,
+      on_exit = function()
+        vim.schedule(function()
+          if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+          -- Wipe the buffer too, or it lingers showing `[Process exited 0]`.
+          if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
+          if on_close then on_close() end
+        end)
+      end,
+    })
+    vim.cmd 'startinsert'
+  end
+
+  vim.keymap.set('n', '<leader>gg', function()
+    float_term('lazygit', function()
+      vim.cmd 'checktime' -- reload buffers lazygit changed under us
+      require('gitsigns').refresh() -- and redraw the gutter
+    end)
+  end, { desc = 'Open lazy[g]it' })
+
+  vim.keymap.set('n', '<leader>gd', function() float_term 'lazydocker' end, { desc = 'Open lazy[d]ocker' })
+
   -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
   -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
   -- is not what someone will guess without a bit more experience.
@@ -371,7 +412,30 @@ do
   --  and try some other statusline plugin
   local statusline = require 'mini.statusline'
   -- Set `use_icons` to true if you have a Nerd Font
-  statusline.setup { use_icons = vim.g.have_nerd_font }
+  statusline.setup {
+    use_icons = vim.g.have_nerd_font,
+    -- mini's default layout, minus the LSP client list and the fileinfo section
+    -- (filetype/encoding/size), with the mode always in its single-letter form.
+    content = {
+      active = function()
+        local mode, mode_hl = statusline.section_mode { trunc_width = math.huge }
+        local git = statusline.section_git { trunc_width = 40 }
+        local diff = statusline.section_diff { trunc_width = 75 }
+        local diagnostics = statusline.section_diagnostics { trunc_width = 75 }
+        local filename = statusline.section_filename { trunc_width = 140 }
+        local location = statusline.section_location { trunc_width = 75 }
+        local search = statusline.section_searchcount { trunc_width = 75 }
+        return statusline.combine_groups {
+          { hl = mode_hl, strings = { mode } },
+          { hl = 'MiniStatuslineDevinfo', strings = { git, diff, diagnostics } },
+          '%<', -- truncate point
+          { hl = 'MiniStatuslineFilename', strings = { filename } },
+          '%=', -- end left alignment
+          { hl = mode_hl, strings = { search, location } },
+        }
+      end,
+    },
+  }
 
   -- You can configure sections in the statusline by overriding their
   -- default behavior. For example, here we set the section for
@@ -913,6 +977,99 @@ do
       end
     end,
   })
+end
+
+-- ============================================================
+-- SECTION 9.5: MARKDOWN PREVIEW
+-- :MdPreview renders the buffer, Mermaid included, in the browser
+-- ============================================================
+do
+  -- Rendering happens locally: pandoc for the Markdown, a vendored mermaid.min.js
+  -- for the diagrams. No plugin, no npm, and no network once the JS is cached.
+  local MERMAID_VERSION = '11.17.2'
+  local mermaid_js = vim.fs.joinpath(vim.fn.stdpath 'data', 'mermaid.min.js')
+
+  local TEMPLATE = [==[<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%s</title>
+<style>
+  :root { --bg:#fff; --fg:#1f2328; --muted:#59636e; --line:#d1d9e0; --code:#f6f8fa; --link:#0969da; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#3d444d; --code:#151b23; --link:#4493f8; }
+  }
+  body { margin:0 auto; max-width:900px; padding:3rem 1.5rem 6rem; background:var(--bg); color:var(--fg);
+         font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; }
+  h1,h2,h3,h4 { line-height:1.25; margin:1.8em 0 .6em; }
+  h1,h2 { padding-bottom:.3em; border-bottom:1px solid var(--line); }
+  a { color:var(--link); }
+  code { background:var(--code); padding:.15em .35em; border-radius:5px;
+         font:13.5px/1.5 ui-monospace,"SF Mono",Menlo,monospace; }
+  pre { background:var(--code); padding:1rem; border-radius:8px; overflow-x:auto; }
+  pre code { background:none; padding:0; }
+  pre.mermaid { background:none; text-align:center; }
+  blockquote { margin:1em 0; padding:0 1em; color:var(--muted); border-left:.25em solid var(--line); }
+  table { border-collapse:collapse; display:block; overflow-x:auto; }
+  th,td { border:1px solid var(--line); padding:.4rem .75rem; }
+  img { max-width:100%%; }
+  hr { border:none; border-top:1px solid var(--line); margin:2em 0; }
+</style></head><body>
+%s
+<script src="file://%s"></script>
+<script>
+  // pandoc emits ```mermaid as <pre class="mermaid"><code>…; hand the raw text to mermaid.
+  for (const el of document.querySelectorAll('pre.mermaid, pre > code.language-mermaid')) {
+    const pre = el.tagName === 'PRE' ? el : el.parentElement
+    const box = document.createElement('pre')
+    box.className = 'mermaid'
+    box.textContent = el.textContent
+    pre.replaceWith(box)
+  }
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+  })
+  mermaid.run()
+</script>
+</body></html>
+]==]
+
+  -- Fetched once, then reused forever; delete the file to upgrade.
+  local function ensure_mermaid()
+    if vim.uv.fs_stat(mermaid_js) then return true end
+    vim.notify('Fetching mermaid ' .. MERMAID_VERSION .. ' (one time)...')
+    local url = ('https://cdn.jsdelivr.net/npm/mermaid@%s/dist/mermaid.min.js'):format(MERMAID_VERSION)
+    local res = vim.system({ 'curl', '-fsSL', '-o', mermaid_js, url }, { text = true }):wait()
+    if res.code ~= 0 then
+      vim.notify('Could not fetch mermaid: ' .. (res.stderr or ''), vim.log.levels.ERROR)
+      return false
+    end
+    return true
+  end
+
+  local function preview()
+    if vim.fn.executable 'pandoc' == 0 then
+      return vim.notify('pandoc is not on $PATH', vim.log.levels.ERROR)
+    end
+    if not ensure_mermaid() then return end
+
+    -- Piped through stdin, so unsaved edits are previewed too.
+    local md = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+    local res = vim.system({ 'pandoc', '--from=gfm', '--to=html5', '--no-highlight' }, { stdin = md, text = true }):wait()
+    if res.code ~= 0 then
+      return vim.notify('pandoc failed: ' .. (res.stderr or ''), vim.log.levels.ERROR)
+    end
+
+    local name = vim.fn.expand '%:t:r'
+    if name == '' then name = 'preview' end
+    local out = vim.fs.joinpath(vim.fn.stdpath 'cache', name .. '.html')
+    vim.fn.writefile(vim.split(TEMPLATE:format(name, res.stdout, mermaid_js), '\n'), out)
+    vim.ui.open(out)
+    vim.notify('Preview: ' .. out)
+  end
+
+  vim.api.nvim_create_user_command('MdPreview', preview, { desc = 'Render this Markdown (with Mermaid) in the browser' })
+  vim.keymap.set('n', '<leader>mp', preview, { desc = '[M]arkdown [P]review in browser' })
 end
 
 -- ============================================================
