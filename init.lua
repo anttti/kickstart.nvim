@@ -982,8 +982,8 @@ do
 end
 
 -- ============================================================
--- SECTION 9.5: MARKDOWN PREVIEW
--- :MdPreview renders the buffer, Mermaid included, in the browser
+-- SECTION 9.5: MARKDOWN
+-- :MdPreview renders the buffer in the browser; wide windows centre the text
 -- ============================================================
 do
   -- Rendering happens locally: pandoc for the Markdown, a vendored mermaid.min.js
@@ -1072,6 +1072,28 @@ do
 
   vim.api.nvim_create_user_command('MdPreview', preview, { desc = 'Render this Markdown (with Mermaid) in the browser' })
   vim.keymap.set('n', '<leader>mp', preview, { desc = '[M]arkdown [P]review in browser' })
+
+  -- Keep prose readable in a wide window by padding it into a centred 120-column
+  -- strip. Padding buffers are skipped entirely when the window is not wider.
+  vim.pack.add { gh 'shortcuts/no-neck-pain.nvim' }
+  local nnp = require 'no-neck-pain'
+  nnp.setup {
+    -- `width` is the whole window, so add the 6-column gutter (numbers + signs)
+    -- and the 2 split separators to land on 120 columns of actual text.
+    width = 128,
+    autocmds = { skipEnteringNoNeckPainBuffer = true }, -- never park the cursor in the padding
+  }
+
+  vim.api.nvim_create_autocmd('FileType', {
+    group = vim.api.nvim_create_augroup('markdown-centered', { clear = true }),
+    pattern = { 'markdown', 'text' },
+    callback = function()
+      -- `:NoNeckPain` toggles, so go through enable() to stay idempotent when
+      -- opening a second Markdown file.
+      if not require('no-neck-pain.state'):is_active_tab_registered() then nnp.enable() end
+    end,
+  })
+  vim.keymap.set('n', '<leader>mc', '<Cmd>NoNeckPain<CR>', { desc = '[M]arkdown [C]entering toggle' })
 end
 
 -- ============================================================
