@@ -356,19 +356,21 @@ do
 
   -- [[ Colorscheme ]]
   -- If you want to see what colorschemes are already installed, you can use `:Telescope colorscheme`.
-  vim.pack.add { gh 'projekt0n/github-nvim-theme' }
-  require('github-theme').setup {
-    options = {
-      styles = {
-        comments = 'NONE', -- Disable italics in comments
-      },
+  vim.pack.add { gh 'navarasu/onedark.nvim' }
+  require('onedark').setup {
+    style = 'light',
+    code_style = {
+      comments = 'none', -- Disable italics in comments
     },
   }
 
   -- Load the colorscheme here.
   -- Like many other themes, this one has different styles, and you could load
-  -- any other, such as 'github_light_default', 'github_light_high_contrast', or 'github_dark'.
-  vim.cmd.colorscheme 'github_light_default'
+  -- any other, such as 'dark', 'darker', 'cool', 'deep', 'warm' or 'warmer'.
+  -- onedark applies the light palette but leaves 'background' alone, so set it
+  -- ourselves for anything else that branches on it.
+  vim.o.background = 'light'
+  vim.cmd.colorscheme 'onedark'
 
   -- Highlight todo, notes, etc in comments
   vim.pack.add { gh 'folke/todo-comments.nvim' }
