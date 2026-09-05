@@ -11,6 +11,8 @@ vim.keymap.set('n', '\\', '<Cmd>Neotree reveal<CR>', { desc = 'NeoTree reveal', 
 
 require('neo-tree').setup {
   filesystem = {
+    -- Default is "open_default", which pops the tree open for `nvim .`.
+    hijack_netrw_behavior = 'disabled',
     window = {
       mappings = {
         ['\\'] = 'close_window',
